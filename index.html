@@ -1,0 +1,1408 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ПОСЛЕДНИЙ СИГНАЛ</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Spectral:ital,wght@0,400;0,600;1,400&display=swap');
+
+  :root {
+    --red: #8b0000;
+    --dim-red: #3a0000;
+    --pale: #c8b8a2;
+    --flicker: #e8d5b0;
+    --static: #0d0d0b;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100%; height: 100%;
+    background: var(--static);
+    color: var(--pale);
+    font-family: 'Spectral', serif;
+    overflow: hidden;
+    cursor: crosshair;
+  }
+
+  /* scanlines */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.12) 2px, rgba(0,0,0,0.12) 4px);
+    pointer-events: none; z-index: 9999;
+  }
+  /* vignette */
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background: radial-gradient(ellipse at center, transparent 35%, rgba(0,0,0,0.92) 100%);
+    pointer-events: none; z-index: 9998;
+  }
+
+  /* ── BG CANVAS (atmospheric illustrations) ── */
+  #bg-canvas {
+    position: fixed; inset: 0;
+    z-index: 2;
+    opacity: 0;
+    transition: opacity 2s ease;
+  }
+  #bg-canvas.show { opacity: 1; }
+
+  /* ── NOISE ── */
+  #noise {
+    position: fixed; inset: 0;
+    z-index: 3; pointer-events: none; opacity: 0.04;
+  }
+
+  /* ── OVERLAYS ── */
+  #flash {
+    position: fixed; inset: 0; background: var(--red);
+    opacity: 0; pointer-events: none; z-index: 9997; transition: opacity 0.08s;
+  }
+  #flash.on { opacity: 0.2; }
+
+  #static-burst {
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0px, transparent 1px, transparent 3px, rgba(255,255,255,0.02) 4px);
+    opacity: 0; pointer-events: none; z-index: 9996; transition: opacity 0.04s;
+  }
+  #static-burst.on { opacity: 1; }
+
+  /* ── HUD ── */
+  #hud {
+    position: fixed; top: 1.2rem; right: 1.5rem; z-index: 20;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.58rem; color: #3a2a1a; letter-spacing: 0.12em;
+    text-align: right; line-height: 2;
+  }
+  #deaths-log {
+    position: fixed; bottom: 1.2rem; right: 1.5rem; z-index: 20;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.55rem; color: #3a2a1a; letter-spacing: 0.1em; text-align: right;
+  }
+  #save-indicator {
+    position: fixed; bottom: 1.2rem; left: 1.5rem; z-index: 20;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.55rem; color: #3a2a1a; letter-spacing: 0.15em;
+    opacity: 0; transition: opacity 1s;
+  }
+  #save-indicator.show { opacity: 1; }
+
+  /* ── SOUND TOGGLE ── */
+  #sound-btn {
+    position: fixed; top: 1.2rem; left: 1.5rem; z-index: 20;
+    background: transparent; border: none; cursor: pointer;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.55rem; color: #3a2a1a; letter-spacing: 0.15em;
+    transition: color 0.3s;
+  }
+  #sound-btn:hover { color: #8b4a2a; }
+
+  /* ── GAME CONTAINER ── */
+  #game {
+    position: fixed; inset: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: center;
+    padding: 2rem; overflow-y: auto;
+  }
+  #screen { width: 100%; max-width: 660px; position: relative; }
+
+  /* ── TITLE ── */
+  .title-wrap { text-align: center; animation: fadein 3s ease forwards; }
+  .title-wrap h1 {
+    font-family: 'Spectral', serif; font-weight: 600;
+    font-size: clamp(1.8rem, 5vw, 3rem); letter-spacing: 0.18em;
+    color: var(--flicker);
+    text-shadow: 0 0 30px rgba(200,150,80,0.5), 0 0 60px rgba(139,0,0,0.4);
+    animation: flicker 7s infinite; margin-bottom: 0.4rem;
+  }
+  .title-sub {
+    font-family: 'Share Tech Mono', monospace; font-size: 0.6rem;
+    letter-spacing: 0.2em; color: var(--dim-red); text-transform: uppercase; margin-bottom: 2.8rem;
+  }
+  .title-epigraph {
+    font-style: italic; font-size: 1rem; color: #6a5a45;
+    margin-bottom: 2.8rem; line-height: 1.7; max-width: 420px; margin-left: auto; margin-right: auto;
+  }
+
+  /* ── SCENE ── */
+  .scene-wrap { animation: fadein 1.6s ease forwards; }
+  .loc-tag {
+    font-family: 'Share Tech Mono', monospace; font-size: 0.56rem;
+    letter-spacing: 0.18em; color: var(--red); text-transform: uppercase;
+    margin-bottom: 1.2rem; opacity: 0.7;
+  }
+  .cond-bar {
+    font-family: 'Share Tech Mono', monospace; font-size: 0.56rem;
+    letter-spacing: 0.15em; color: #3a2a18;
+    display: flex; gap: 1.4rem; flex-wrap: wrap; margin-bottom: 1.4rem;
+  }
+  .cond-bar .on { color: #8b4a2a; }
+
+  /* Typewriter target */
+  .prose {
+    font-size: clamp(0.98rem, 2.4vw, 1.15rem);
+    line-height: 1.9; color: var(--pale); margin-bottom: 1.8rem;
+    min-height: 4rem;
+  }
+  .prose em { color: #9a6a5a; font-style: italic; }
+  .bad { color: #c04040; font-style: italic; }
+  .low {
+    font-size: 0.76em; color: #4a3a28; font-style: italic;
+    display: block; margin-top: 0.35rem;
+  }
+
+  /* typing cursor */
+  .cursor {
+    display: inline-block; width: 2px; height: 1em;
+    background: var(--pale); vertical-align: middle; margin-left: 2px;
+    animation: blink 0.7s step-end infinite;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+  .sep {
+    width: 100%; height: 1px;
+    background: linear-gradient(to right, transparent, rgba(139,0,0,0.28), transparent);
+    margin: 1.4rem 0;
+  }
+
+  /* choices hidden until typing ends */
+  .choices {
+    display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1.2rem;
+    opacity: 0; transition: opacity 0.8s ease;
+  }
+  .choices.visible { opacity: 1; }
+
+  .choice {
+    background: transparent; border: 1px solid rgba(139,0,0,0.35);
+    color: var(--pale); font-family: 'Spectral', serif; font-size: 1.04rem;
+    padding: 0.72rem 1.1rem; text-align: left; cursor: pointer; transition: all 0.28s ease;
+  }
+  .choice::before { content: '› '; color: var(--red); font-size: 1.15em; }
+  .choice:hover {
+    background: rgba(139,0,0,0.1); border-color: rgba(139,0,0,0.75);
+    color: var(--flicker); text-shadow: 0 0 10px rgba(200,150,80,0.35);
+    transform: translateX(4px);
+  }
+
+  /* ── ENDING ── */
+  .ending-wrap { text-align: center; animation: fadein 4s ease forwards; }
+  .ending-title {
+    font-family: 'Spectral', serif; font-weight: 600;
+    font-size: clamp(0.9rem, 2.5vw, 1.25rem); letter-spacing: 0.12em;
+    color: var(--red); margin-bottom: 2rem; animation: flicker 3.5s infinite;
+  }
+  .ending-prose {
+    font-size: 1.08rem; line-height: 1.95; color: #7a6a55; font-style: italic;
+    margin-bottom: 2.2rem; max-width: 500px; margin-left: auto; margin-right: auto;
+  }
+  .final-line {
+    font-family: 'Share Tech Mono', monospace; font-size: 0.58rem;
+    color: #3a2a1a; letter-spacing: 0.15em; text-transform: uppercase; margin-bottom: 2.5rem;
+  }
+
+  .btn {
+    background: transparent; border: 1px solid rgba(139,0,0,0.45);
+    color: var(--pale); font-family: 'Share Tech Mono', monospace;
+    font-size: 0.7rem; letter-spacing: 0.15em; text-transform: uppercase;
+    padding: 0.7rem 2rem; cursor: pointer; transition: all 0.28s;
+  }
+  .btn:hover { background: rgba(139,0,0,0.18); border-color: var(--red); color: var(--flicker); }
+
+  /* ── SKIP BUTTON ── */
+  #skip-btn {
+    position: fixed; bottom: 3rem; left: 50%; transform: translateX(-50%);
+    z-index: 30; background: transparent; border: none;
+    font-family: 'Share Tech Mono', monospace; font-size: 0.5rem;
+    color: #2a1a0a; letter-spacing: 0.2em; cursor: pointer;
+    opacity: 0; transition: opacity 0.5s;
+  }
+  #skip-btn.show { opacity: 1; }
+  #skip-btn:hover { color: #5a3a2a; }
+
+  /* ── KEYFRAMES ── */
+  @keyframes fadein {
+    from { opacity: 0; transform: translateY(7px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes flicker {
+    0%,94%,100%{opacity:1} 95%{opacity:0.35} 96%{opacity:0.85} 97%{opacity:0.15} 98%{opacity:0.9}
+  }
+  .bleed { animation: bleed 3.2s ease-in-out infinite; }
+  @keyframes bleed {
+    0%  { text-shadow: 0 0 5px rgba(139,0,0,0.5); }
+    50% { text-shadow: 0 0 22px rgba(139,0,0,0.95), 2px 0 9px rgba(139,0,0,0.6); }
+    100%{ text-shadow: 0 0 5px rgba(139,0,0,0.5); }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="bg-canvas"></canvas>
+<canvas id="noise"></canvas>
+<div id="flash"></div>
+<div id="static-burst"></div>
+
+<div id="hud"><div id="hud-day">ДЕНЬ —</div><div id="hud-loc">—</div></div>
+<div id="save-indicator">▪ СИГНАЛ СОХРАНЁН</div>
+<div id="deaths-log"></div>
+<button id="sound-btn" onclick="toggleSound()">♪ ЗВУК: ВКЛ</button>
+<button id="skip-btn" onclick="skipTyping()">[ ПРОПУСТИТЬ ]</button>
+
+<div id="game"><div id="screen"></div></div>
+
+<script>
+// ══════════════════════════════════════════════════════
+//  NOISE CANVAS
+// ══════════════════════════════════════════════════════
+(function(){
+  var c=document.getElementById('noise'), x=c.getContext('2d');
+  c.width=window.innerWidth; c.height=window.innerHeight;
+  function draw(){
+    var img=x.createImageData(c.width,c.height);
+    for(var i=0;i<img.data.length;i+=4){var v=Math.random()*255|0;img.data[i]=img.data[i+1]=img.data[i+2]=v;img.data[i+3]=6;}
+    x.putImageData(img,0,0);
+    setTimeout(function(){requestAnimationFrame(draw);},90);
+  }
+  draw();
+})();
+
+// ══════════════════════════════════════════════════════
+//  BACKGROUND ILLUSTRATIONS (SVG drawn to canvas per scene)
+// ══════════════════════════════════════════════════════
+var BG = {
+  canvas: document.getElementById('bg-canvas'),
+  ctx: null,
+  current: null,
+
+  init: function(){
+    this.canvas.width = window.innerWidth;
+    this.canvas.height = window.innerHeight;
+    this.ctx = this.canvas.getContext('2d');
+  },
+
+  clear: function(){
+    this.ctx.clearRect(0,0,this.canvas.width,this.canvas.height);
+    this.canvas.classList.remove('show');
+  },
+
+  draw: function(type){
+    if(type === this.current) return;
+    this.current = type;
+    var W=this.canvas.width, H=this.canvas.height, ctx=this.ctx;
+    ctx.clearRect(0,0,W,H);
+    this.canvas.classList.add('show');
+
+    if(type==='tower') this._drawTower(ctx,W,H);
+    else if(type==='window') this._drawWindow(ctx,W,H);
+    else if(type==='corridor') this._drawCorridor(ctx,W,H);
+    else if(type==='south') this._drawSouth(ctx,W,H);
+    else if(type==='forest') this._drawForest(ctx,W,H);
+    else if(type==='bunker') this._drawBunker(ctx,W,H);
+    else if(type==='lab') this._drawLab(ctx,W,H);
+    else if(type==='hospital') this._drawHospital(ctx,W,H);
+    else if(type==='void') this._drawVoid(ctx,W,H);
+    else if(type==='apartment_inside') this._drawApartmentInside(ctx,W,H);
+  },
+
+  _drawTower: function(ctx,W,H){
+    // Sick sky
+    var sky=ctx.createLinearGradient(0,0,0,H);
+    sky.addColorStop(0,'rgba(30,10,5,0.85)');
+    sky.addColorStop(0.6,'rgba(60,20,10,0.6)');
+    sky.addColorStop(1,'rgba(5,5,5,0.9)');
+    ctx.fillStyle=sky; ctx.fillRect(0,0,W,H);
+    // Tower silhouette
+    var cx=W/2;
+    ctx.fillStyle='rgba(5,3,3,0.95)';
+    ctx.beginPath();
+    ctx.moveTo(cx-60,H); ctx.lineTo(cx-45,H*0.6);
+    ctx.lineTo(cx-25,H*0.3); ctx.lineTo(cx-8,H*0.08);
+    ctx.lineTo(cx,H*0.02); ctx.lineTo(cx+8,H*0.08);
+    ctx.lineTo(cx+25,H*0.3); ctx.lineTo(cx+45,H*0.6);
+    ctx.lineTo(cx+60,H); ctx.closePath(); ctx.fill();
+    // Tower glow
+    var glow=ctx.createRadialGradient(cx,H*0.05,0,cx,H*0.05,120);
+    glow.addColorStop(0,'rgba(180,60,20,0.25)');
+    glow.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=glow; ctx.fillRect(0,0,W,H);
+    // Small windows on tower
+    ctx.fillStyle='rgba(180,80,20,0.6)';
+    [[cx-15,H*0.45],[cx+15,H*0.45],[cx-10,H*0.35],[cx+10,H*0.35],[cx,H*0.25]].forEach(function(p){
+      ctx.fillRect(p[0]-3,p[1]-4,6,8);
+    });
+    // Ground silhouette of people
+    ctx.fillStyle='rgba(8,4,4,0.9)';
+    for(var i=0;i<18;i++){
+      var px=W*0.15+i*(W*0.7/18), py=H*0.88;
+      ctx.beginPath();
+      ctx.arc(px,py-14,5,0,Math.PI*2); ctx.fill();
+      ctx.fillRect(px-3,py-9,6,18);
+    }
+  },
+
+  _drawWindow: function(ctx,W,H){
+    ctx.fillStyle='rgba(8,5,5,0.9)'; ctx.fillRect(0,0,W,H);
+    // window frame
+    var wx=W/2-120, wy=H/2-160, ww=240, wh=280;
+    ctx.strokeStyle='rgba(60,40,30,0.8)'; ctx.lineWidth=12;
+    ctx.strokeRect(wx,wy,ww,wh);
+    // sky through window
+    var innerSky=ctx.createLinearGradient(wx,wy,wx,wy+wh);
+    innerSky.addColorStop(0,'rgba(50,15,5,0.7)');
+    innerSky.addColorStop(1,'rgba(20,8,3,0.8)');
+    ctx.fillStyle=innerSky; ctx.fillRect(wx+6,wy+6,ww-12,wh-12);
+    // cross-frame
+    ctx.strokeStyle='rgba(60,40,30,0.8)'; ctx.lineWidth=8;
+    ctx.beginPath(); ctx.moveTo(W/2,wy); ctx.lineTo(W/2,wy+wh); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(wx,H/2-20); ctx.lineTo(wx+ww,H/2-20); ctx.stroke();
+    // figures in window
+    ctx.fillStyle='rgba(3,2,2,0.95)';
+    [W/2-50,W/2,W/2+50].forEach(function(px){
+      ctx.beginPath(); ctx.arc(px,H/2+50,6,0,Math.PI*2); ctx.fill();
+      ctx.fillRect(px-4,H/2+56,8,20);
+    });
+  },
+
+  _drawCorridor: function(ctx,W,H){
+    ctx.fillStyle='rgba(5,4,4,0.95)'; ctx.fillRect(0,0,W,H);
+    // Perspective corridor
+    var vx=W/2, vy=H*0.45;
+    ctx.strokeStyle='rgba(40,25,15,0.6)'; ctx.lineWidth=1.5;
+    // Walls
+    ctx.fillStyle='rgba(12,8,6,0.9)';
+    ctx.beginPath();
+    ctx.moveTo(0,0); ctx.lineTo(W,0); ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath(); ctx.fill();
+    // Floor lines to vanishing point
+    for(var i=0;i<=8;i++){
+      var fx=i*(W/8);
+      ctx.beginPath(); ctx.moveTo(fx,H); ctx.lineTo(vx,vy); ctx.stroke();
+    }
+    // Ceiling lines
+    for(var j=0;j<=8;j++){
+      var cx2=j*(W/8);
+      ctx.beginPath(); ctx.moveTo(cx2,0); ctx.lineTo(vx,vy); ctx.stroke();
+    }
+    // Doors on sides (receding)
+    ctx.strokeStyle='rgba(50,30,20,0.5)'; ctx.lineWidth=1;
+    [[W*0.1,H*0.2,W*0.22,H*0.8],[W*0.78,H*0.2,W*0.9,H*0.8]].forEach(function(d){
+      ctx.strokeRect(d[0],d[1],d[2]-d[0],d[3]-d[1]);
+    });
+    [[W*0.3,H*0.3,W*0.38,H*0.7],[W*0.62,H*0.3,W*0.7,H*0.7]].forEach(function(d){
+      ctx.strokeRect(d[0],d[1],d[2]-d[0],d[3]-d[1]);
+    });
+    // Figure at end
+    ctx.fillStyle='rgba(2,1,1,1)';
+    ctx.beginPath(); ctx.arc(vx,vy-18,8,0,Math.PI*2); ctx.fill();
+    ctx.fillRect(vx-5,vy-10,10,22);
+    // Flickering light
+    var lg=ctx.createRadialGradient(vx,vy,0,vx,vy,200);
+    lg.addColorStop(0,'rgba(80,50,20,0.15)');
+    lg.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=lg; ctx.fillRect(0,0,W,H);
+  },
+
+  _drawSouth: function(ctx,W,H){
+    ctx.fillStyle='rgba(5,4,3,0.92)'; ctx.fillRect(0,0,W,H);
+    // Wrong-color sky gradient
+    var sky=ctx.createLinearGradient(0,0,0,H*0.6);
+    sky.addColorStop(0,'rgba(35,18,8,0.85)');
+    sky.addColorStop(1,'rgba(15,8,5,0.7)');
+    ctx.fillStyle=sky; ctx.fillRect(0,0,W,H*0.6);
+    // Road perspective
+    ctx.fillStyle='rgba(10,8,6,0.9)';
+    ctx.beginPath();
+    ctx.moveTo(W*0.35,H); ctx.lineTo(W*0.48,H*0.55);
+    ctx.lineTo(W*0.52,H*0.55); ctx.lineTo(W*0.65,H); ctx.closePath(); ctx.fill();
+    // Road disappears into void
+    var rg=ctx.createLinearGradient(W/2,H*0.55,W/2,H*0.65);
+    rg.addColorStop(0,'rgba(35,18,8,0.6)');
+    rg.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=rg; ctx.fillRect(W*0.45,H*0.5,W*0.1,H*0.15);
+    // Edge — the void
+    var vg=ctx.createLinearGradient(0,H*0.52,0,H*0.62);
+    vg.addColorStop(0,'rgba(50,20,10,0.5)');
+    vg.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=vg; ctx.fillRect(0,H*0.5,W,H*0.12);
+    // Attendant silhouette
+    ctx.fillStyle='rgba(5,3,3,0.95)';
+    ctx.beginPath(); ctx.arc(W*0.75,H*0.72,9,0,Math.PI*2); ctx.fill();
+    ctx.fillRect(W*0.75-5,H*0.72+9,10,28);
+  },
+
+  _drawForest: function(ctx,W,H){
+    ctx.fillStyle='rgba(3,5,3,0.96)'; ctx.fillRect(0,0,W,H);
+    // Dead trees
+    ctx.strokeStyle='rgba(20,15,10,0.9)'; ctx.lineWidth=3;
+    var treePositions=[0.05,0.12,0.2,0.28,0.35,0.65,0.72,0.8,0.88,0.95];
+    treePositions.forEach(function(tx){
+      var x=W*tx, baseY=H, tipY=H*(0.1+Math.random()*0.3);
+      ctx.beginPath(); ctx.moveTo(x,baseY); ctx.lineTo(x,tipY); ctx.stroke();
+      // branches
+      ctx.lineWidth=1.5;
+      for(var b=0;b<4;b++){
+        var by=tipY+(baseY-tipY)*(0.2+b*0.18);
+        var bl=30+b*15, ba=(Math.random()-0.5)*0.8;
+        ctx.beginPath(); ctx.moveTo(x,by);
+        ctx.lineTo(x+Math.cos(ba)*bl,by-Math.sin(Math.abs(ba))*bl/2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x,by);
+        ctx.lineTo(x-Math.cos(ba)*bl,by-Math.sin(Math.abs(ba))*bl/2); ctx.stroke();
+      }
+      ctx.lineWidth=3;
+    });
+    // Fog
+    var fog=ctx.createLinearGradient(0,H*0.5,0,H);
+    fog.addColorStop(0,'rgba(0,0,0,0)');
+    fog.addColorStop(1,'rgba(15,12,10,0.7)');
+    ctx.fillStyle=fog; ctx.fillRect(0,0,W,H);
+    // Eyes in the dark
+    [[W*0.15,H*0.4],[W*0.45,H*0.35],[W*0.82,H*0.42]].forEach(function(e){
+      ctx.fillStyle='rgba(120,30,10,0.5)';
+      ctx.beginPath(); ctx.ellipse(e[0]-6,e[1],4,2,0,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(e[0]+6,e[1],4,2,0,0,Math.PI*2); ctx.fill();
+    });
+  },
+
+  _drawBunker: function(ctx,W,H){
+    ctx.fillStyle='rgba(4,4,5,0.97)'; ctx.fillRect(0,0,W,H);
+    // Concrete walls - rough texture
+    ctx.fillStyle='rgba(15,13,12,0.9)';
+    ctx.fillRect(0,0,W*0.12,H); ctx.fillRect(W*0.88,0,W*0.12,H);
+    ctx.fillRect(0,0,W,H*0.08); ctx.fillRect(0,H*0.92,W,H*0.08);
+    // Grid of cracks
+    ctx.strokeStyle='rgba(30,22,18,0.4)'; ctx.lineWidth=1;
+    for(var ci=0;ci<12;ci++){
+      ctx.beginPath(); ctx.moveTo(W*0.12+ci*(W*0.76/12),H*0.08);
+      ctx.lineTo(W*0.12+ci*(W*0.76/12),H*0.92); ctx.stroke();
+    }
+    // Central table with papers
+    ctx.fillStyle='rgba(18,14,10,0.9)';
+    ctx.fillRect(W*0.3,H*0.55,W*0.4,H*0.25);
+    ctx.strokeStyle='rgba(40,28,18,0.6)'; ctx.lineWidth=1;
+    ctx.strokeRect(W*0.3,H*0.55,W*0.4,H*0.25);
+    // Papers on table
+    [[W*0.33,H*0.58],[W*0.42,H*0.6],[W*0.55,H*0.57],[W*0.62,H*0.61]].forEach(function(p){
+      ctx.fillStyle='rgba(35,28,20,0.8)';
+      ctx.save(); ctx.translate(p[0],p[1]); ctx.rotate((Math.random()-0.5)*0.3);
+      ctx.fillRect(-18,-12,36,24); ctx.restore();
+    });
+    // Red strings connecting points on wall
+    ctx.strokeStyle='rgba(100,10,10,0.3)'; ctx.lineWidth=1;
+    var pts=[[W*0.15,H*0.2],[W*0.25,H*0.35],[W*0.4,H*0.25],[W*0.55,H*0.3],[W*0.7,H*0.2],[W*0.82,H*0.35]];
+    for(var pi=0;pi<pts.length-1;pi++){
+      ctx.beginPath(); ctx.moveTo(pts[pi][0],pts[pi][1]); ctx.lineTo(pts[pi+1][0],pts[pi+1][1]); ctx.stroke();
+      ctx.fillStyle='rgba(120,15,15,0.6)'; ctx.beginPath(); ctx.arc(pts[pi][0],pts[pi][1],3,0,Math.PI*2); ctx.fill();
+    }
+  },
+
+  _drawLab: function(ctx,W,H){
+    ctx.fillStyle='rgba(3,5,4,0.96)'; ctx.fillRect(0,0,W,H);
+    // Equipment silhouettes
+    // Large cylinder
+    ctx.fillStyle='rgba(12,14,12,0.9)';
+    ctx.beginPath(); ctx.ellipse(W*0.2,H*0.45,30,80,0,0,Math.PI*2); ctx.fill();
+    ctx.fillRect(W*0.2-30,H*0.45,60,H*0.4);
+    ctx.beginPath(); ctx.ellipse(W*0.2,H*0.85,30,15,0,0,Math.PI*2); ctx.fill();
+    // Screens on wall
+    [0.35,0.55,0.75].forEach(function(sx){
+      ctx.fillStyle='rgba(5,15,8,0.4)';
+      ctx.fillRect(W*sx-25,H*0.15,50,35);
+      // Fake graph lines
+      ctx.strokeStyle='rgba(20,60,25,0.6)'; ctx.lineWidth=1;
+      ctx.beginPath();
+      var startX=W*sx-22, lineY=H*0.15+18;
+      ctx.moveTo(startX,lineY);
+      for(var li=0;li<8;li++){
+        ctx.lineTo(startX+li*6,lineY+(Math.random()-0.5)*12);
+      }
+      ctx.stroke();
+    });
+    // Tubes and wires
+    ctx.strokeStyle='rgba(25,20,15,0.7)'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(W*0.25,H*0.4); ctx.bezierCurveTo(W*0.4,H*0.2,W*0.6,H*0.5,W*0.75,H*0.35); ctx.stroke();
+    // Eerie green glow from something
+    var gg=ctx.createRadialGradient(W*0.75,H*0.55,0,W*0.75,H*0.55,100);
+    gg.addColorStop(0,'rgba(20,80,30,0.2)');
+    gg.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=gg; ctx.fillRect(0,0,W,H);
+  },
+
+  _drawHospital: function(ctx,W,H){
+    ctx.fillStyle='rgba(5,5,6,0.96)'; ctx.fillRect(0,0,W,H);
+    // Beds silhouettes
+    [0.2,0.5,0.8].forEach(function(bx){
+      ctx.fillStyle='rgba(12,10,10,0.9)';
+      ctx.fillRect(W*bx-40,H*0.55,80,H*0.3);
+      // Figure in bed
+      ctx.beginPath(); ctx.ellipse(W*bx,H*0.58,10,7,0,0,Math.PI*2); ctx.fill();
+      ctx.fillRect(W*bx-8,H*0.65,16,H*0.15);
+      // IV drip
+      ctx.strokeStyle='rgba(30,22,18,0.5)'; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(W*bx+35,H*0.4); ctx.lineTo(W*bx+35,H*0.65); ctx.stroke();
+      ctx.beginPath(); ctx.arc(W*bx+35,H*0.38,8,0,Math.PI*2);
+      ctx.strokeStyle='rgba(30,22,18,0.4)'; ctx.stroke();
+    });
+    // Overhead lights (flickering style)
+    [0.25,0.5,0.75].forEach(function(lx){
+      var lg2=ctx.createRadialGradient(W*lx,H*0.1,0,W*lx,H*0.1,100);
+      lg2.addColorStop(0,'rgba(60,50,30,0.15)');
+      lg2.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.fillStyle=lg2; ctx.fillRect(0,0,W,H);
+    });
+    // Writing on wall
+    ctx.fillStyle='rgba(80,15,15,0.3)';
+    ctx.font='bold 14px monospace';
+    ctx.fillText('ОНИ СЛЫШАТ', W*0.1, H*0.3);
+    ctx.fillText('НЕ СМОТРИ', W*0.6, H*0.25);
+    ctx.fillText('ЕЩЁ ОСТАЛОСЬ ВРЕМЯ', W*0.15, H*0.42);
+  },
+
+  _drawVoid: function(ctx,W,H){
+    // Just wrong color gradient - deeply unsettling
+    var vg2=ctx.createRadialGradient(W/2,H/2,0,W/2,H/2,Math.max(W,H));
+    vg2.addColorStop(0,'rgba(40,15,5,0.6)');
+    vg2.addColorStop(0.4,'rgba(20,8,3,0.7)');
+    vg2.addColorStop(0.8,'rgba(8,3,2,0.85)');
+    vg2.addColorStop(1,'rgba(0,0,0,0.95)');
+    ctx.fillStyle=vg2; ctx.fillRect(0,0,W,H);
+    // Horizon line barely visible
+    ctx.strokeStyle='rgba(60,20,8,0.25)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(0,H*0.5); ctx.lineTo(W,H*0.5); ctx.stroke();
+    // Figure walking away
+    ctx.fillStyle='rgba(3,2,2,0.95)';
+    ctx.beginPath(); ctx.arc(W*0.5,H*0.48,5,0,Math.PI*2); ctx.fill();
+    ctx.fillRect(W*0.5-3,H*0.48+5,6,14);
+  },
+
+  _drawApartmentInside: function(ctx,W,H){
+    ctx.fillStyle='rgba(6,5,4,0.95)'; ctx.fillRect(0,0,W,H);
+    // Room walls
+    ctx.fillStyle='rgba(10,8,7,0.9)';
+    ctx.fillRect(W*0.05,H*0.05,W*0.9,H*0.9);
+    // Floor perspective
+    ctx.strokeStyle='rgba(25,18,12,0.5)'; ctx.lineWidth=1;
+    for(var fi=0;fi<6;fi++){
+      ctx.beginPath(); ctx.moveTo(W*0.05+fi*(W*0.9/5),H*0.65);
+      ctx.lineTo(W*0.3+fi*(W*0.4/5),H*0.95); ctx.stroke();
+    }
+    // Chair silhouette (the thing sitting in it)
+    var chairX=W*0.62, chairY=H*0.45;
+    ctx.fillStyle='rgba(8,6,5,0.97)';
+    // Chair back
+    ctx.fillRect(chairX-22,chairY-50,44,50);
+    // Seat
+    ctx.fillRect(chairX-25,chairY,50,12);
+    // Legs
+    ctx.fillRect(chairX-22,chairY+12,8,25);
+    ctx.fillRect(chairX+14,chairY+12,8,25);
+    // FIGURE in the chair - backlit, wrong silhouette
+    ctx.fillStyle='rgba(3,2,2,1)';
+    ctx.beginPath(); ctx.arc(chairX,chairY-55,14,0,Math.PI*2); ctx.fill();
+    ctx.fillRect(chairX-12,chairY-41,24,40);
+    // Something wrong with the proportions
+    ctx.beginPath(); ctx.arc(chairX+20,chairY-62,4,0,Math.PI*2); ctx.fill();
+    // Faint glow around it
+    var cg=ctx.createRadialGradient(chairX,chairY-40,0,chairX,chairY-40,80);
+    cg.addColorStop(0,'rgba(60,10,5,0.1)');
+    cg.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=cg; ctx.fillRect(0,0,W,H);
+    // Window showing outside
+    ctx.fillStyle='rgba(20,10,5,0.7)';
+    ctx.fillRect(W*0.1,H*0.15,W*0.2,H*0.25);
+    var wg=ctx.createLinearGradient(W*0.1,H*0.15,W*0.1,H*0.4);
+    wg.addColorStop(0,'rgba(50,15,5,0.5)');
+    wg.addColorStop(1,'rgba(15,5,2,0.6)');
+    ctx.fillStyle=wg; ctx.fillRect(W*0.1,H*0.15,W*0.2,H*0.25);
+  }
+};
+
+// ══════════════════════════════════════════════════════
+//  WEB AUDIO — PROCEDURAL AMBIENT HORROR MUSIC
+// ══════════════════════════════════════════════════════
+var AUDIO = {
+  ctx: null, masterGain: null, enabled: true,
+  nodes: [], drones: [],
+
+  init: function(){
+    try{
+      this.ctx = new (window.AudioContext||window.webkitAudioContext)();
+      this.masterGain = this.ctx.createGain();
+      this.masterGain.gain.value = 0.18;
+      this.masterGain.connect(this.ctx.destination);
+      this._startDrones();
+      this._startHeartbeat();
+      this._startWhisperNoise();
+    }catch(e){ this.enabled=false; }
+  },
+
+  _startDrones: function(){
+    var self=this, ctx=this.ctx;
+    // Three detuned sine waves for an unsettling chord
+    var freqs=[36.7, 54.9, 43.7]; // very low, dissonant
+    freqs.forEach(function(f,i){
+      var osc=ctx.createOscillator();
+      var gain=ctx.createGain();
+      var filter=ctx.createBiquadFilter();
+      osc.type='sine';
+      osc.frequency.value=f;
+      gain.gain.value=0.3+i*0.05;
+      filter.type='lowpass'; filter.frequency.value=200;
+      osc.connect(filter); filter.connect(gain); gain.connect(self.masterGain);
+      osc.start();
+      self.drones.push({osc:osc,gain:gain});
+      // Slowly modulate pitch — uneasy
+      var lfo=ctx.createOscillator();
+      var lfoGain=ctx.createGain();
+      lfo.frequency.value=0.03+i*0.01;
+      lfoGain.gain.value=0.3;
+      lfo.connect(lfoGain); lfoGain.connect(osc.frequency);
+      lfo.start();
+    });
+  },
+
+  _startHeartbeat: function(){
+    var self=this, ctx=this.ctx;
+    function beat(){
+      if(!self.enabled||!self.ctx) return;
+      var now=ctx.currentTime;
+      var osc=ctx.createOscillator();
+      var gain=ctx.createGain();
+      osc.type='sine'; osc.frequency.value=55;
+      gain.gain.setValueAtTime(0,now);
+      gain.gain.linearRampToValueAtTime(0.4,now+0.05);
+      gain.gain.exponentialRampToValueAtTime(0.001,now+0.3);
+      osc.connect(gain); gain.connect(self.masterGain);
+      osc.start(now); osc.stop(now+0.35);
+      // Second thump (the lub-dub)
+      var osc2=ctx.createOscillator();
+      var gain2=ctx.createGain();
+      osc2.type='sine'; osc2.frequency.value=50;
+      gain2.gain.setValueAtTime(0,now+0.18);
+      gain2.gain.linearRampToValueAtTime(0.25,now+0.22);
+      gain2.gain.exponentialRampToValueAtTime(0.001,now+0.45);
+      osc2.connect(gain2); gain2.connect(self.masterGain);
+      osc2.start(now+0.18); osc2.stop(now+0.5);
+      setTimeout(beat,2800+Math.random()*600);
+    }
+    setTimeout(beat,1500);
+  },
+
+  _startWhisperNoise: function(){
+    var self=this, ctx=this.ctx;
+    var bufSize=ctx.sampleRate*3;
+    var buf=ctx.createBuffer(1,bufSize,ctx.sampleRate);
+    var data=buf.getChannelData(0);
+    for(var i=0;i<bufSize;i++) data[i]=(Math.random()*2-1)*0.4;
+    var source=ctx.createBufferSource();
+    source.buffer=buf; source.loop=true;
+    var filter=ctx.createBiquadFilter();
+    filter.type='bandpass'; filter.frequency.value=2200; filter.Q.value=0.8;
+    var gain=ctx.createGain(); gain.gain.value=0.04;
+    source.connect(filter); filter.connect(gain); gain.connect(self.masterGain);
+    source.start();
+  },
+
+  playStatic: function(){
+    if(!this.enabled||!this.ctx) return;
+    var ctx=this.ctx, now=ctx.currentTime;
+    var buf=ctx.createBuffer(1,ctx.sampleRate*0.1,ctx.sampleRate);
+    var data=buf.getChannelData(0);
+    for(var i=0;i<data.length;i++) data[i]=Math.random()*2-1;
+    var src=ctx.createBufferSource(); src.buffer=buf;
+    var gain=ctx.createGain(); gain.gain.value=0.3;
+    src.connect(gain); gain.connect(this.ctx.destination);
+    src.start();
+  },
+
+  playClick: function(){
+    if(!this.enabled||!this.ctx) return;
+    var ctx=this.ctx, now=ctx.currentTime;
+    var osc=ctx.createOscillator();
+    var gain=ctx.createGain();
+    osc.type='square'; osc.frequency.value=800+Math.random()*400;
+    gain.gain.setValueAtTime(0.06,now);
+    gain.gain.exponentialRampToValueAtTime(0.001,now+0.04);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(now); osc.stop(now+0.05);
+  },
+
+  intensify: function(){
+    if(!this.enabled||!this.masterGain) return;
+    this.masterGain.gain.linearRampToValueAtTime(0.32, this.ctx.currentTime+2);
+  },
+  calm: function(){
+    if(!this.enabled||!this.masterGain) return;
+    this.masterGain.gain.linearRampToValueAtTime(0.18, this.ctx.currentTime+3);
+  },
+
+  toggle: function(){
+    this.enabled=!this.enabled;
+    if(this.masterGain){
+      this.masterGain.gain.value=this.enabled?0.18:0;
+    }
+    document.getElementById('sound-btn').textContent='♪ ЗВУК: '+(this.enabled?'ВКЛ':'ВЫКЛ');
+  }
+};
+
+window.toggleSound=function(){ AUDIO.toggle(); };
+
+// ══════════════════════════════════════════════════════
+//  TYPEWRITER ENGINE
+// ══════════════════════════════════════════════════════
+var TW = {
+  queue: [], running: false, skipFlag: false, onDone: null,
+
+  type: function(el, html, speed, onDone){
+    this.skipFlag=false; this.onDone=onDone||null;
+    // Show skip button
+    var skipBtn=document.getElementById('skip-btn');
+    skipBtn.classList.add('show');
+    // Strip HTML tags to get plain text, then re-inject HTML progressively
+    // Strategy: build a text node list, type char by char
+    var self=this;
+    var plainText='';
+    var tmp=document.createElement('div'); tmp.innerHTML=html;
+    plainText=tmp.textContent||tmp.innerText||'';
+    // We'll type the HTML by tracking char position in plain text
+    // but render actual HTML spans. Simpler: just type into innerHTML word by word
+    var words=html.split(/(?<=\s)/); // split keeping spaces
+    var idx=0;
+    el.innerHTML='';
+    var cursor=document.createElement('span');
+    cursor.className='cursor'; el.appendChild(cursor);
+
+    function typeNext(){
+      if(self.skipFlag){
+        el.innerHTML=html;
+        skipBtn.classList.remove('show');
+        if(self.onDone) self.onDone();
+        return;
+      }
+      if(idx>=words.length){
+        // Remove cursor
+        var c=el.querySelector('.cursor');
+        if(c) c.remove();
+        skipBtn.classList.remove('show');
+        if(self.onDone) self.onDone();
+        return;
+      }
+      var w=words[idx++];
+      var c2=el.querySelector('.cursor');
+      if(c2) c2.remove();
+      el.innerHTML=el.innerHTML+w;
+      cursor=document.createElement('span');
+      cursor.className='cursor'; el.appendChild(cursor);
+      AUDIO.playClick();
+      var delay=speed||(w.trim()===''?80:35+Math.random()*40);
+      if(w.includes('<br>')) delay+=120;
+      setTimeout(typeNext,delay);
+    }
+    typeNext();
+  }
+};
+
+window.skipTyping=function(){
+  TW.skipFlag=true;
+};
+
+// ══════════════════════════════════════════════════════
+//  EFFECTS
+// ══════════════════════════════════════════════════════
+function triggerFlash(){
+  AUDIO.playStatic();
+  var el=document.getElementById('flash');
+  el.classList.add('on'); setTimeout(function(){el.classList.remove('on');},160);
+}
+function triggerStatic(){
+  var el=document.getElementById('static-burst');
+  el.classList.add('on'); setTimeout(function(){el.classList.remove('on');},75);
+}
+function setHUD(day,loc){
+  document.getElementById('hud-day').textContent=day?'ДЕНЬ '+day:'ДЕНЬ —';
+  document.getElementById('hud-loc').textContent=loc||'—';
+}
+function flashSave(){
+  var el=document.getElementById('save-indicator');
+  el.classList.add('show'); setTimeout(function(){el.classList.remove('show');},2200);
+}
+function updateDeathsLog(){
+  var d=loadDeaths();
+  document.getElementById('deaths-log').textContent=d.length>0?d.length+'/12 КОНЦОВОК ОТКРЫТО':'';
+}
+
+// ══════════════════════════════════════════════════════
+//  STORAGE
+// ══════════════════════════════════════════════════════
+function loadSave(){try{var r=localStorage.getItem('tls_ru2_save');return r?JSON.parse(r):null;}catch(e){return null;}}
+function writeSave(s){try{localStorage.setItem('tls_ru2_save',JSON.stringify(s));flashSave();}catch(e){}}
+function clearSave(){try{localStorage.removeItem('tls_ru2_save');}catch(e){}}
+function loadDeaths(){try{var r=localStorage.getItem('tls_ru2_deaths');return r?JSON.parse(r):[];}catch(e){return[];}}
+function recordDeath(id){
+  var d=loadDeaths();
+  if(d.indexOf(id)===-1){d.push(id);try{localStorage.setItem('tls_ru2_deaths',JSON.stringify(d));}catch(e){}}
+  updateDeathsLog();
+}
+
+// ══════════════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════════════
+var STATE={scene:'title',day:1,flags:{},path:[]};
+function flag(k,v){if(v===undefined)return STATE.flags[k];STATE.flags[k]=v;}
+
+// ══════════════════════════════════════════════════════
+//  NAVIGATION
+// ══════════════════════════════════════════════════════
+window.goTo=function(id,delay){
+  triggerStatic();
+  setTimeout(function(){
+    triggerFlash();
+    STATE.scene=id;
+    writeSave(STATE);
+    render(id);
+  },delay||80);
+};
+window.choose=function(key,next){
+  STATE.path.push(key);
+  window.goTo(next);
+};
+window.startGame=function(){
+  if(!AUDIO.ctx) AUDIO.init();
+  STATE={scene:'scene1',day:1,flags:{},path:[]};
+  writeSave(STATE);
+  triggerStatic();
+  setTimeout(function(){triggerFlash();render('scene1');},120);
+};
+window.restartGame=function(){
+  clearSave();
+  STATE={scene:'title',day:1,flags:{},path:[]};
+  BG.clear(); BG.current=null;
+  AUDIO.calm();
+  triggerStatic();
+  setTimeout(function(){triggerFlash();render('title');},120);
+};
+
+// ══════════════════════════════════════════════════════
+//  RENDER WITH TYPEWRITER
+// ══════════════════════════════════════════════════════
+function render(id){
+  var fn=SCENES[id];
+  if(!fn){console.error('Сцена не найдена: '+id);return;}
+  var html=fn();
+  document.getElementById('screen').innerHTML=html;
+  updateDeathsLog();
+  // Animate prose with typewriter
+  var proseEl=document.getElementById('prose-target');
+  var proseText=document.getElementById('prose-text');
+  var choicesEl=document.getElementById('choices-target');
+  if(proseEl&&proseText&&choicesEl){
+    var content=proseEl.getAttribute('data-content');
+    proseEl.innerHTML='';
+    TW.type(proseEl,content,null,function(){
+      if(choicesEl) choicesEl.classList.add('visible');
+    });
+  } else if(choicesEl){
+    choicesEl.classList.add('visible');
+  }
+}
+
+// ══════════════════════════════════════════════════════
+//  SCENE BUILDER HELPER
+// ══════════════════════════════════════════════════════
+function S(locTag,condHtml,proseHtml,choicesHtml,bg){
+  if(bg) BG.draw(bg);
+  return '<div class="scene-wrap">' +
+    '<div class="loc-tag">'+locTag+'</div>' +
+    (condHtml?'<div class="cond-bar">'+condHtml+'</div>':'')+
+    '<div id="prose-target" data-content="'+proseHtml.replace(/"/g,'&quot;')+'" class="prose"></div>'+
+    '<div class="sep"></div>'+
+    '<div id="choices-target" class="choices">'+choicesHtml+'</div>'+
+    '</div>';
+}
+function C(text,key,next){ return '<button class="choice" onclick="choose(\''+key+'\',\''+next+'\')">'+text+'</button>'; }
+function E(titleText,proseHtml,finalLine,btnText){
+  return '<div class="ending-wrap">'+
+    '<div class="ending-title bleed">'+titleText+'</div>'+
+    '<div class="ending-prose">'+proseHtml+'</div>'+
+    '<div class="final-line">'+finalLine+'</div>'+
+    '<button class="btn" onclick="restartGame()">'+btnText+'</button>'+
+    '</div>';
+}
+
+// ══════════════════════════════════════════════════════
+//  SCENES
+// ══════════════════════════════════════════════════════
+var SCENES={};
+
+// ── ЗАСТАВКА ──────────────────────────────────────────
+SCENES['title']=function(){
+  setHUD(null,null); BG.clear(); BG.current=null;
+  return '<div class="title-wrap">'+
+    '<h1>ПОСЛЕДНИЙ СИГНАЛ</h1>'+
+    '<div class="title-sub">Передача из конца всего</div>'+
+    '<div class="title-epigraph">Ты проснулся. Небо не того цвета.<br>По радио играет песня, которую ты не узнаёшь,<br>на языке, которого больше не существует.</div>'+
+    '<button class="btn" onclick="startGame()">ПРИНЯТЬ СИГНАЛ</button>'+
+    '</div>';
+};
+
+// ══════════════ ДЕНЬ 1 ══════════════
+
+SCENES['scene1']=function(){
+  setHUD(1,'КВАРТИРА 7В');
+  return S('День 1 — 07:14 — Квартира 7В',
+    '<span class="on">НЕ СПИШЬ</span><span>ГОЛОДЕН</span><span>ОДИН</span>',
+    'Будильник не сработал. Тебя разбудило что-то другое — низкий, ровный гул снаружи, как сигнал маяка, которому некуда идти.<br><br>За окном небо цвета несвежего мяса. Не красное. Не оранжевое. Что-то <em>между</em>.<br><br>На телефоне одно уведомление.<span class="low">«всё ещё здесь. а ты?» — без имени. без номера.</span><br><br>Входная дверь открыта. Ты не помнишь, как её открывал.',
+    C('Посмотреть в окно. Считать, что двигается.','look_outside','scene2_outside')+
+    C('Ответить на сообщение.','check_phone','scene2_phone')+
+    C('Подойти к открытой двери.','go_door','scene2_door'),
+    'apartment_inside');
+};
+
+SCENES['scene2_outside']=function(){
+  setHUD(1,'ОКНО / 7-Й ЭТАЖ');
+  return S('День 1 — 07:17 — Окно, 7-й этаж','',
+    'Трое на улице внизу. Стоят неподвижно, смотрят на север — в сторону башни.<br><br>Башня всегда была там. Тебя никогда не интересовало, что она передаёт.<br><br>А сейчас — интересует.<br><br>К трём присоединяется четвёртый. Потом пятый. Никто не смотрит друг на друга. Никто не смотрит вверх.<br><br><span class="bad">Все держат левую руку под углом ровно девяносто градусов. Как будто ждут, что на неё кто-то сядет.</span><span class="low">Сообщение появляется снова: «не ходи на север».</span>',
+    C('Идти на север. К башне.','go_north','scene3_street')+
+    C('Покинуть город. Идти на юг.','go_south','scene3_south')+
+    C('Запереть дверь. Остаться.','stay_in','scene3_stay'),
+    'window');
+};
+
+SCENES['scene2_phone']=function(){
+  setHUD(1,'КВАРТИРА 7В'); flag('replied',true);
+  return S('День 1 — 07:18 — Экран телефона','',
+    'Ты пишешь: <em>«Да. Я здесь.»</em><br><br>Сообщение доставлено немедленно. Три точки появляются, исчезают, появляются снова. Четыре минуты.<br><br>Потом: <em>«хорошо. не смотри на башню.»</em><br><br>Ты смотришь на башню.<br><br><span class="bad">Конечно смотришь.</span><br><br>Она ближе, чем вчера. Ты уверен в этом абсолютно. Башня не двигается.<span class="low">Ещё одно сообщение: «я же говорил».</span>',
+    C('Идти к башне.','go_north','scene3_street')+
+    C('Уйти. Не оглядываться.','go_south','scene3_south')+
+    C('Остаться. Продолжать переписку.','stay_in','scene3_stay'),
+    'apartment_inside');
+};
+
+SCENES['scene2_door']=function(){
+  setHUD(1,'КОРИДОР');
+  return S('День 1 — 07:15 — Коридор, 7-й этаж','',
+    'Коридор пуст. Флуоресцентные лампы гудят на частоте, от которой ноют зубы.<br><br>Соседка из 7Г — Вера Константиновна — сидит в открытом проёме своей двери. Руки сложены на коленях. Смотрит перед собой. За шесть лет она никогда так не делала.<br><br>Ты называешь её по имени.<br><br>Она медленно поворачивает голову. Её выражение — то, для которого у тебя нет слова. Не пустое. Не испуганное. <span class="bad">Что-то хуже — будто она уже приняла то, о чём тебе ещё не сказали.</span><br><br><em>«Ты собираешься попробовать остановить это, да.»</em> Это не вопрос.',
+    C('Спросить, что происходит.','ask_vael','scene3_vael')+
+    C('Пройти мимо. Идти к башне.','go_north','scene3_street')+
+    C('Спуститься по лестнице. Уйти.','go_south','scene3_south'),
+    'corridor');
+};
+
+SCENES['scene3_vael']=function(){
+  setHUD(1,'КОРИДОР'); flag('knows_truth',true);
+  return S('День 1 — 07:22 — Коридор','',
+    '<em>«Сигнал начался три дня назад. Большинство людей его не слышат. Ты слышишь. Поэтому ты проснулся.»</em><br><br>Ты говоришь, что ничего не слышал.<br><br><em>«Ты слышал это во сне. Поэтому тебе снились цифры.»</em><br><br>Тебе снились цифры. Ты не думал об этом до этой секунды.<br><br><span class="bad">Она называет первые семь цифр последовательности из твоего сна. Правильно. Без паузы.</span><br><br><em>«Башня зовёт таких, как ты, в конце. Тех, кто мог бы сопротивляться. Они все равно идут.»</em><br><br>Она встаёт. Закрывает дверь. Ты слышишь, как она запирает её изнутри.<br><br>Потом — тишина.',
+    C('Всё равно идти к башне.','go_north','scene3_street')+
+    C('Бежать. Покинуть город прямо сейчас.','go_south','scene3_south')+
+    C('Вернуться к себе. Думать.','stay_in','scene3_stay'),
+    'corridor');
+};
+
+// ── ПУТЬ НА СЕВЕР (расширенный) ───────────────────────
+
+SCENES['scene3_street']=function(){
+  setHUD(1,'НА СЕВЕР'); flag('went_north',true);
+  return S('День 1 — 08:40 — Главная улица','',
+    'Идущих на север десятки. У всех один ритм — не синхронный, но согласованный, как ключи на одной связке.<br><br>Звук усиливается. Не громче. <em>Глубже.</em> Ты чувствуешь его в грудине.<br><br>Мимо проходит женщина с собакой. Собака идёт рядом — спокойно, с тем же ритмом, что и все остальные. Она не тянет поводок. Она не обнюхивает землю.<br><br><span class="bad">Она смотрит вперёд. Точно так же, как женщина. Точно так же, как все.</span><br><br>На тротуаре девочка рисует мелом. Ты видишь рисунок краем глаза.<span class="low">Не останавливайся. Ты не хочешь знать, что там нарисовано.</span>',
+    C('Остановиться. Посмотреть на рисунок.','stop_child','scene4_child')+
+    C('Продолжить идти. Не смотреть.','continue_north','scene4_tower_approach'),
+    'tower');
+};
+
+SCENES['scene4_child']=function(){
+  setHUD(1,'ТРОТУАР / ГЛАВНАЯ УЛИЦА');
+  var timesPlayed=loadDeaths().length+1;
+  return S('День 1 — 08:43 — Тротуар','',
+    'Ты останавливаешься.<br><br>На тротуаре — схема твоей квартиры. Твоё окно. Ты, стоящий у него. Потом — стрелка. Потом ещё одна схема: ты на улице. Потом ещё. И ещё. Целая история в мелу.<br><br>В последнем кадре — фигурка лежит.<br><br>Девочка поднимает голову. Смотрит на тебя.<br><br><em>«Ты опять здесь.»</em><br><br>Опять?<br><br><em>«Ты всегда останавливаешься у рисунка. Каждый раз.»</em><br><br>Ты спрашиваешь: сколько раз?<br><br>Она пишет цифру. <span class="bad">Это число '+timesPlayed+'.</span><span class="low">«Иди к башне,» — говорит она. «Или не ходи. Результат одинаковый.»</span>',
+    C('Идти к башне.','obey_child','scene4_tower_approach')+
+    C('Спросить, как это остановить.','ask_how','scene4_child_ask')+
+    C('Сесть рядом. Не двигаться.','refuse_child','scene4_refuse'),
+    'tower');
+};
+
+SCENES['scene4_child_ask']=function(){
+  setHUD(1,'ТРОТУАР');
+  return S('День 1 — 08:50 — Тротуар','',
+    'Ты спрашиваешь: как это остановить?<br><br>Она долго не отвечает. Рисует. Стирает. Снова рисует.<br><br><em>«Раньше был один человек, который знал. Он шёл в другую сторону.»</em><br><br>Ты спрашиваешь: куда?<br><br><em>«В подвал под старой больницей. Он говорил, что там начало сигнала. Не башня — башня только конец. Начало — внизу.»</em><br><br>Она стирает последний рисунок и начинает новый. На этот раз — лестница, уходящая вниз. В темноту.<br><br><span class="bad">Она рисует тебя у входа. Потом стирает.</span><span class="low">«Он тоже остановился здесь,» — говорит она. «Спросил то же самое.»</span>',
+    C('Идти в больницу. Найти подвал.','go_hospital','scene_hospital_exterior')+
+    C('Это ловушка. Идти к башне.','dismiss_hospital','scene4_tower_approach')+
+    C('Сесть. Отказаться двигаться.','refuse_child','scene4_refuse'),
+    'tower');
+};
+
+SCENES['scene4_refuse']=function(){
+  setHUD(1,'ТРОТУАР');
+  return S('День 1 — 08:51 — Тротуар','',
+    'Ты садишься. Отказываешься двигаться.<br><br>Проходит час. Два. Поток людей на север иссякает. Небо меняет цвета без названий.<br><br>Девочка рисует тебя — снова и снова, в разных ситуациях. Вот ты идёшь к башне. Вот уходишь. Вот открываешь дверь. Она рисует и стирает, рисует и стирает.<br><br><em>«Ты единственный, кто всегда садится,» — говорит она. — «Я думала, это что-то изменит. На пятый раз. На десятый.»</em><br><br>Ты спрашиваешь: изменило?<br><br>Она молчит.<br><br>Она рисует маленькую фигурку, сидящую на тротуаре. <span class="bad">В каждом следующем кадре фигурка меньше. Не уходит. Просто перестаёт быть.</span><span class="low">Меловая пыль не сдувается — она оседает на тебе.</span>',
+    C('Остаться. Позволить этому случиться.','become_less','ending_erasure')+
+    C('Встать. Идти к башне.','get_up','scene4_tower_approach')+
+    C('Встать. Идти в больницу.','get_up_hospital','scene_hospital_exterior'),
+    'tower');
+};
+
+SCENES['scene4_tower_approach']=function(){
+  setHUD(1,'БАШНЯ — ВХОД'); AUDIO.intensify();
+  return S('День 1 — 10:10 — Вход в башню','',
+    'Вблизи башня больше, чем казалась. Поверхность гладкая — без заклёпок, без швов. Её не строили. Её вырастили.<br><br>Люди входят через открытую дверь. Никто не колеблется.<br><br>Ты останавливаешься у порога.<br><br>Тон очень сильный здесь. Он проходит сквозь зубы. Ты понимаешь, что слышал его всю жизнь — под каждым другим звуком — и замечаешь только сейчас, потому что он наконец стал честным о том, чем является.<br><br><span class="bad">Кто-то выходит из башни. Первый человек, которого ты видишь выходящим. Это ты. Точная копия. Она смотрит на тебя. Поворачивается. Уходит на север.</span><span class="low">Телефон вибрирует: «не входи за своей копией».</span>',
+    C('Войти в башню.','enter','scene4_tower_inside')+
+    C('Идти за копией.','follow_copy','scene_copy')+
+    C('Подождать снаружи.','wait_outside','scene4_wait_outside'),
+    'tower');
+};
+
+SCENES['scene_copy']=function(){
+  setHUD(1,'НА СЕВЕР / ЗА БАШНЕЙ');
+  return S('День 1 — 10:15 — Улица за башней','',
+    'Ты следуешь за собой.<br><br>Копия идёт быстрее, чем ты. Не бежит — просто быстрее, с каждым шагом немного быстрее, так что разрыв нарастает незаметно.<br><br>Ты переходишь в незнакомый район. Дома здесь старше. Окна темнее. Ни одного человека в процессии.<br><br>Копия останавливается у подъезда. Ждёт. Когда ты подходишь близко, ты видишь её лицо.<br><br><span class="bad">Не твоё. Или — твоё, но изнутри наружу. Как будто ты смотришь на себя из зеркала, которое показывает не отражение, а то, что внутри.</span><br><br>Она говорит твоим голосом: <em>«Ты не должен был идти за мной. Теперь мы оба здесь.»</em><span class="low">Подъезд открыт. Внутри темно.</span>',
+    C('Войти в подъезд.','enter_copy_building','scene_copy_building')+
+    C('Бежать обратно к башне.','run_back_tower','scene4_tower_inside')+
+    C('Спросить, что она такое.','ask_copy','scene_copy_ask'),
+    'forest');
+};
+
+SCENES['scene_copy_ask']=function(){
+  setHUD(1,'УЛИЦА ЗА БАШНЕЙ');
+  return S('День 1 — 10:22 — Улица','',
+    '<em>«Что я такое?»</em><br><br>Она повторяет вопрос. Точно твоей интонацией.<br><br><em>«Я — то, чем ты станешь, если войдёшь в башню. Сигнал берёт слепок. Сначала голос, потом память, потом то, что ты называешь собой. Я вышла, потому что слепок уже готов. Тебе туда идти не обязательно.»</em><br><br>Ты спрашиваешь: что тогда будет с тобой?<br><br><em>«Ты останешься здесь. Пустой. Как скорлупа. Это не больно. Это просто — очень тихо.»</em><br><br>Она смотрит на тебя долго. Потом говорит:<br><br><em>«Или войди. Хотя бы это будет твоим выбором.»</em>',
+    C('Войти в башню. Это мой выбор.','own_choice','scene4_tower_inside')+
+    C('Войти в тот подъезд. Посмотреть, что там.','enter_copy_building','scene_copy_building')+
+    C('Уйти. Попробовать больницу.','go_from_copy','scene_hospital_exterior'),
+    'forest');
+};
+
+SCENES['scene_copy_building']=function(){
+  setHUD(1,'СТАРЫЙ ПОДЪЕЗД');
+  return S('День 1 — 10:30 — Подъезд','',
+    'Внутри темно и пахнет чем-то — не гнилью, не химикатами, а временем. Как пахнет место, которое давно не помнит людей.<br><br>Копия исчезла.<br><br>На стенах — заметки. Сотни бумажек, прикреплённых кнопками, скотчем, гвоздями. Разный почерк. Разные языки. Одна тема.<br><br>Ты берёшь ближайшую: <em>«Башня выбирает тех, кто может слышать частоту. Таких мало. Если ты читаешь это — ты один из них. Не входи в башню. Найди генератор под больницей №4. Отключи питание.»</em><br><br><span class="bad">Дата на записке — тридцать лет назад. Почерк — твой.</span><span class="low">Ты не мог написать это тридцать лет назад. Тебе не было и десяти.</span>',
+    C('Идти в больницу №4.','go_hospital_note','scene_hospital_exterior')+
+    C('Взять все записки и идти к башне.','take_notes_tower','scene4_tower_inside')+
+    C('Остаться здесь. Читать всё.','read_notes','scene_read_notes'),
+    'bunker');
+};
+
+SCENES['scene_read_notes']=function(){
+  setHUD(1,'СТАРЫЙ ПОДЪЕЗД');
+  return S('День 1 — 11:00 — Подъезд','',
+    'Ты читаешь час. Потом ещё час.<br><br>Записки — от людей, которые слышали сигнал. Разные города. Разные годы. Некоторые — из будущего: даты, которых ещё нет.<br><br>Паттерн всегда один: человек просыпается, слышит тон, видит небо не того цвета. Потом — выбор. Башня. Побег. Сопротивление.<br><br>Почти все записки обрываются на полуслове.<br><br>Одна — очень старая, бумага почти рассыпается — написана не чернилами, а чем-то тёмным и засохшим, что ты предпочитаешь не анализировать. Там одна фраза:<br><br><em>«Генератор — это не выключатель. Это не источник сигнала. Это то, что удерживает нас здесь. Не выключай его.»</em><br><br><span class="bad">Ты читаешь эту записку ещё раз. Потом ещё. Ты не можешь решить, что это значит.</span>',
+    C('Всё равно идти в больницу.','go_anyway','scene_hospital_exterior')+
+    C('Идти к башне. Записки не помогут.','ignore_notes','scene4_tower_inside')+
+    C('Вернуться на улицу. Подумать.','back_to_street','scene3_south'),
+    'bunker');
+};
+
+// ── БОЛЬНИЦА (новая ветка) ────────────────────────────
+
+SCENES['scene_hospital_exterior']=function(){
+  setHUD(2,'БОЛЬНИЦА №4');
+  return S('День 2 — 06:00 — Больница №4, внешний вид','',
+    'Больница на краю города. Закрытая — судя по табличкам, уже восемь лет. Но свет в нескольких окнах горит.<br><br>Главные двери заперты. Боковая — нет.<br><br>Снаружи тихо. Тот же тон, что и везде, но здесь он — <em>другой</em>. Как будто он исходит изнутри, а не снаружи. Как будто здание само является источником.<br><br>У входа — каталка. На ней что-то лежит под простынёй.<br><br><span class="bad">Оно поднимает руку, когда ты проходишь мимо. Медленно. Как приветствие. Потом опускает.</span><span class="low">Ты не заглядываешь под простыню.</span>',
+    C('Войти через боковую дверь.','enter_hospital','scene_hospital_inside')+
+    C('Спуститься сразу в подвал — есть внешний вход.','go_basement_direct','scene_basement')+
+    C('Это слишком. Идти к башне.','too_much_tower','scene4_tower_approach'),
+    'hospital');
+};
+
+SCENES['scene_hospital_inside']=function(){
+  setHUD(2,'БОЛЬНИЦА №4 — ХОЛЛ');
+  return S('День 2 — 06:10 — Больница, первый этаж','',
+    'Холл больницы. Регистратура пуста, но на стойке горит настольная лампа и лежит раскрытый журнал записей.<br><br>Последняя запись датирована вчерашним числом. Имя пациента — твоё имя.<br><br>Диагноз в графе записан на языке, которого ты не знаешь.<br><br>Коридор ведёт вглубь. Откуда-то доносится — не звук, а ощущение звука. Что-то хирургически точное и очень низкое.<br><br>Лестница вниз — в подвал — закрыта ржавой решёткой. Ключ висит рядом на гвозде.<br><br><span class="bad">Ключ тёплый. Кто-то только что держал его в руке.</span>',
+    C('Взять ключ. Спуститься в подвал.','take_key','scene_basement')+
+    C('Сначала исследовать больницу. Поискать выживших.','explore_hospital','scene_hospital_explore')+
+    C('Уйти. Здесь что-то не так.','leave_hospital','scene4_return'),
+    'hospital');
+};
+
+SCENES['scene_hospital_explore']=function(){
+  setHUD(2,'БОЛЬНИЦА №4 — ПАЛАТЫ');
+  return S('День 2 — 06:30 — Больница, второй этаж','',
+    'В палатах — люди. Живые, дышат. Лежат в кроватях, не двигаются, смотрят в потолок.<br><br>Ты пробуешь заговорить. Ни один не реагирует.<br><br>Один поворачивает голову. Смотрит на тебя. Его губы двигаются.<br><br>Ты наклоняешься.<br><br><em>«Ты слышишь его сейчас?»</em><br><br>Да.<br><br><em>«Тогда уже поздно. Ты уже внутри сигнала. Остаётся только решить, чем ты в нём будешь.»</em><br><br>Он снова смотрит в потолок.<br><br><span class="bad">У всех пациентов в палате шрамы в одном месте — за левым ухом. Маленькие. Аккуратные. Свежие.</span><span class="low">Ты трогаешь место за своим левым ухом. Ничего нет. Ты уверен в этом.</span>',
+    C('Вернуться. Спуститься в подвал.','back_to_basement','scene_basement')+
+    C('Остаться. Ждать, пока они что-то скажут.','wait_patients','scene_hospital_wait')+
+    C('Покинуть больницу. Идти к башне.','leave_to_tower','scene4_tower_approach'),
+    'hospital');
+};
+
+SCENES['scene_hospital_wait']=function(){
+  setHUD(2,'БОЛЬНИЦА №4 — ПАЛАТЫ');
+  return S('День 2 — 08:00 — Больница, второй этаж','',
+    'Ты ждёшь.<br><br>Час. Полтора.<br><br>Они начинают говорить одновременно. Не голосами — они не открывают рот. Что-то внутри тебя слышит их всех сразу, как помехи на нескольких частотах.<br><br>Они говорят одно и то же. Разными способами. На разных языках. Смысл один:<br><br><em>Генератор питает не сигнал. Генератор питает нас. Если ты его выключишь — нас не станет. Если оставишь — нас тоже не станет. Просто дольше.</em><br><br><span class="bad">Один из них смотрит прямо на тебя. Его шрам за ухом открылся. Он светится. Тем же неправильным цветом, что небо.</span><span class="low">Ты понимаешь, что твой телефон давно не вибрировал. Ты его уже не ищешь.</span>',
+    C('Идти в подвал. Принять решение там.','to_basement_final','scene_basement')+
+    C('Остаться с ними. Лечь в свободную кровать.','stay_with_patients','ending_patients'),
+    'hospital');
+};
+
+SCENES['scene_basement']=function(){
+  setHUD(2,'ПОДВАЛ БОЛЬНИЦЫ');
+  return S('День 2 — 07:00 — Подвал','',
+    'Подвал уходит глубже, чем должен.<br><br>Три лестничных пролёта вниз — это уже не подвал, это что-то старше здания. Кирпич сменяется камнем, камень сменяется чем-то, у чего нет названия в строительстве.<br><br>Генератор в центре. Старый. Огромный. Гудит — но это не электрический гул. Это <em>тот самый тон</em>.<br><br>Генератор — это и есть источник.<br><br>Рядом — человек. Сидит спиной. Что-то пишет.<br><br>Ты называешь его. Он оборачивается.<br><br><span class="bad">Это ты. Старше лет на двадцать. Смотрит без удивления. Говорит: «Ты пришёл раньше, чем я ожидал. Или позже. Я уже не понимаю разницы.»</span>',
+    C('Спросить, что происходит.','ask_older_self','scene_basement_talk')+
+    C('Выключить генератор немедленно.','kill_generator','ending_generator_off')+
+    C('Уйти. Не трогать ничего.','leave_basement','scene4_return'),
+    'bunker');
+};
+
+SCENES['scene_basement_talk']=function(){
+  setHUD(2,'ПОДВАЛ БОЛЬНИЦЫ');
+  return S('День 2 — 07:15 — Подвал','',
+    'Старший ты говорит долго.<br><br>Сигнал существует столько же, сколько существует язык. Может — дольше. Он не из башни. Башня — просто антенна. Генератор — не источник питания. Генератор удерживает сигнал в <em>этой</em> частоте. Без него сигнал распространится на всё. Везде. Без фильтра.<br><br><em>«Я пытался выключить его. Двадцать лет назад. Это не остановило ничего — просто расширило. Теперь я его поддерживаю. Потому что сужение — это единственное, что у нас есть.»</em><br><br>Ты спрашиваешь: у нас?<br><br>Он указывает на стены. Там — имена. Сотни имён. Все вырезаны в камне.<br><br><span class="bad">Твоё имя тоже есть. Дата рядом — завтрашняя.</span><span class="low">«Ты всегда спрашиваешь про имя,» — говорит он. — «Я тоже спрашивал.»</span>',
+    C('Выключить генератор. Расширение не хуже этого.','kill_gen_choice','ending_generator_off')+
+    C('Остаться здесь. Помочь поддерживать его.','stay_with_older','ending_basement_stay')+
+    C('Уйти к башне. Принять сигнал напрямую.','to_tower_from_basement','scene4_tower_inside'),
+    'bunker');
+};
+
+// ── ЮГ ───────────────────────────────────────────────
+
+SCENES['scene3_south']=function(){
+  setHUD(1,'ОКРАИНА / ЮГ'); flag('went_south',true);
+  return S('День 1 — 09:15 — Южная дорога','',
+    'Город редеет. Небо становится шире — и неправильный цвет расползается дальше.<br><br>Заправочная станция. Служащий сидит снаружи, курит, смотрит на тебя.<br><br><em>«Свободна от чего?»</em> — спрашивает он прежде, чем ты успеваешь что-то сказать.<br><br>Ты смотришь на юг. Дорога обрывается примерно в километре. Не баррикада. <span class="bad">Земля за ней — тот же неправильный цвет, что небо.</span><br><br>Служащий больше не курит. Не дышит. Но смотрит.',
+    C('Идти туда, где кончается дорога.','walk_void','ending_void')+
+    C('Поговорить со служащим.','ask_attendant','scene4_attendant')+
+    C('Вернуться. Попробовать север.','return_north','scene4_return')+
+    C('Свернуть с дороги. Пойти через лес.','go_forest','scene_forest'),
+    'south');
+};
+
+SCENES['scene_forest']=function(){
+  setHUD(1,'ЛЕС / К ЮГО-ЗАПАДУ');
+  return S('День 1 — 10:00 — Лес','',
+    'Лес мёртвый. Деревья стоят, но листьев нет. Даже мёртвых — просто нет. Как будто их никогда и не было.<br><br>Тишина здесь другая, чем в городе. Там — отсутствие звука. Здесь — его поглощение. Ты произносишь слово вслух. Оно звучит на полметра и исчезает.<br><br>Ты идёшь час.<br><br>Потом замечаешь, что идёшь обратно. Не сворачивал, не разворачивался — просто идёшь обратно в город.<br><br><span class="bad">Следы в грязи. Твои. Идут навстречу тебе. Как будто ты уже прошёл этот путь в обратном направлении — но ты этого не делал.</span><span class="low">Лес не выпускает. Или выпускает — но только туда, откуда ты пришёл.</span>',
+    C('Вернуться в город. К башне.','forest_to_tower','scene4_tower_approach')+
+    C('Пытаться снова. Идти глубже в лес.','deeper_forest','scene_forest_deep'),
+    'forest');
+};
+
+SCENES['scene_forest_deep']=function(){
+  setHUD(1,'ГЛУБОКИЙ ЛЕС');
+  return S('День 1 — 12:00 — Лес','',
+    'Ты идёшь глубже. Час. Три часа.<br><br>Деревья становятся плотнее — но по-прежнему мёртвые. Ни звука. Ни ветра. Ни животных.<br><br>В четырёх часах ходьбы от города — поляна. На поляне — дом. Маленький. Деревянный. В окне горит свет.<br><br>Дверь открыта.<br><br>Внутри — радио. Оно играет.<br><br>Ты слышишь голос. Он передаёт сигнал — те самые цифры из твоего сна. Снова и снова. Монотонно. Без пауз.<br><br><span class="bad">Это твой голос.</span><span class="low">Радио старое. Ему лет пятьдесят. Оно не могло записать твой голос.</span>',
+    C('Выключить радио.','turn_off_radio','scene_radio_off')+
+    C('Слушать. Попробовать запомнить последовательность.','listen_radio','scene_radio_listen')+
+    C('Уйти. Бежать обратно в город.','flee_forest','scene4_return'),
+    'forest');
+};
+
+SCENES['scene_radio_off']=function(){
+  setHUD(1,'ДОМ В ЛЕСУ');
+  return S('День 1 — 12:30 — Дом в лесу','',
+    'Ты выключаешь радио.<br><br>Тишина.<br><br>Настоящая тишина. Первая за весь день.<br><br>Потом тон башни возвращается. Тихий, но возвращается. Он был везде, ты просто не замечал, пока радио не перестало его заглушать.<br><br>На столе рядом с радио — тетрадь. Ты открываешь её.<br><br>Каждая страница — цифры. Та же последовательность, которую ты слышал.<br><br>На последней странице — не цифры. Текст:<br><br><em>«Если ты выключил радио — ты уже знаешь, что тишины нет. Есть только то, что ты замечаешь и то, что умеешь игнорировать. Сигнал существовал до тебя. Он будет после. Выбор один: осознанно или нет.»</em><br><br><span class="bad">Ты переворачиваешь тетрадь. На обложке — твоё имя и дата рождения.</span>',
+    C('Взять тетрадь. Идти к башне.','take_notebook_tower','scene4_tower_inside')+
+    C('Взять тетрадь. Идти в больницу.','take_notebook_hospital','scene_hospital_exterior')+
+    C('Оставить всё. Жечь дом.','burn_house','ending_fire'),
+    'forest');
+};
+
+SCENES['scene_radio_listen']=function(){
+  setHUD(1,'ДОМ В ЛЕСУ');
+  return S('День 1 — 13:00 — Дом в лесу','',
+    'Ты слушаешь.<br><br>Долго.<br><br>Последовательность повторяется. Ты начинаешь её запоминать. Потом понимаешь, что уже знаешь её — знал с утра, с того момента, как проснулся. Она была в снах. Она была раньше снов.<br><br>Ты пробуешь её произнести вслух.<br><br>Радио замолкает.<br><br>Свет в доме гаснет.<br><br>Потом — голос из радио (твой голос, но другой, тот, каким ты был бы, если бы не боялся). Он говорит одно слово:<br><br><span class="bad"><em>«Наконец.»</em></span><span class="low">Ты не знаешь, сколько ты здесь стоишь. Когда ты выходишь, уже темно.</span>',
+    C('Идти обратно в город. К башне.','night_to_tower','scene4_tower_inside')+
+    C('Остаться в доме до утра.','stay_house','scene_house_night'),
+    'forest');
+};
+
+SCENES['scene_house_night']=function(){
+  setHUD(2,'ДОМ В ЛЕСУ — НОЧЬ');
+  return S('День 2 — 03:00 — Дом в лесу','',
+    'Ты засыпаешь в кресле.<br><br>Снишься ты сам. Стоишь перед башней. Входишь. Видишь круги. Видишь пульт. Тянешься к микрофону.<br><br>Во сне — ты останавливаешься. Не берёшь микрофон. Разворачиваешься. Выходишь из башни. Идёшь обратно.<br><br>Это первый сон, в котором ты уходишь из башни.<br><br>Когда просыпаешься — светло. Тон башни тише. Не исчез, но тише. Как будто сон что-то изменил.<br><br><span class="bad">Или как будто сигнал показал тебе, что ты хочешь видеть.</span><span class="low">Ты не можешь знать, какое из двух верно.</span>',
+    C('Идти к башне. Попробовать выйти.','try_leave_tower','scene4_tower_inside')+
+    C('Идти в больницу. Выключить генератор.','morning_hospital','scene_basement'),
+    'forest');
+};
+
+// ── ОСТАЛЬНЫЕ ВЕТКИ ──────────────────────────────────
+
+SCENES['scene4_attendant']=function(){
+  setHUD(1,'ЗАПРАВОЧНАЯ СТАНЦИЯ');
+  return S('День 1 — 09:22 — Заправочная станция','',
+    'Он не дышит, но смотрит.<br><br>Ты говоришь ему это напрямую.<br><br><em>«Хм.»</em><br><br>Ты говоришь: ты не настоящий.<br><br><em>«Это разумная интерпретация.»</em><br><br>Ты спрашиваешь: тогда зачем ты здесь?<br><br>Он берёт новую сигарету. Прикуривает, хотя огня нет.<br><br><em>«Я здесь, чтобы ты остановился. Большинство не останавливаются. Идут дальше, видят край, идут через него. Ты остановился. Значит, ты ещё выбираешь.»</em><br><br>Он достаёт телефон. Твой номер. Твоё имя: ТЫ (ПРЕДЫДУЩИЙ).<br><br><span class="bad">«Четырнадцать итераций назад ты решил оставить себе записку. Не помогло. Но ты всё равно читал её каждый раз.»</span>',
+    C('Вернуться на север. К башне.','return_tower','scene4_return')+
+    C('Спросить про больницу.','ask_hospital','scene_attendant_hospital')+
+    C('Уйти за край дороги.','walk_void_2','ending_void'),
+    'south');
+};
+
+SCENES['scene_attendant_hospital']=function(){
+  setHUD(1,'ЗАПРАВОЧНАЯ СТАНЦИЯ');
+  return S('День 1 — 09:35 — Заправочная станция','',
+    '<em>«Больница?»</em><br><br>Он молчит долго.<br><br><em>«Генератор существует. Я не буду врать. Но человек, который там сидит — тоже существует. Он не выходит с тысяча девятьсот восемьдесят четвёртого года. Он держит генератор вручную. Если уйдёт — всё расширится.»</em><br><br>Ты спрашиваешь: кто он?<br><br>Служащий смотрит на тебя долго.<br><br><em>«Ты уже встречал его сегодня?»</em><br><br>Нет.<br><br><em>«Встретишь.»</em><br><br>Он берёт ещё одну сигарету, которой нет.',
+    C('Идти в больницу.','go_hospital_att','scene_hospital_exterior')+
+    C('Вернуться к башне.','return_tower_att','scene4_return'),
+    'south');
+};
+
+SCENES['scene4_wait_outside']=function(){
+  setHUD(1,'БАШНЯ — ВХОД');
+  return S('День 1 — 10:10 — Снаружи башни','',
+    'Ты ждёшь. Два часа. Поток людей иссякает. Ты — один.<br><br>Дверь остаётся открытой.<br><br>Потом из башни выходит ребёнок. Не та девочка с мелом — другой. Мальчик. Лет семи.<br><br>Он подходит к тебе. Протягивает что-то.<br><br>Листок бумаги. На нём — одна фраза, напечатанная на машинке: <em>«Если ты не войдёшь, кто-то другой войдёт вместо тебя. Это не лучше.»</em><br><br>Ты спрашиваешь, кто его послал.<br><br><span class="bad">Он показывает на тебя.</span><span class="low">Мальчик уходит обратно в башню. Он не оглядывается.</span>',
+    C('Войти в башню.','enter_finally','scene4_tower_inside')+
+    C('Уйти в больницу.','go_from_outside','scene_hospital_exterior')+
+    C('Сесть. Не двигаться.','sit_outside','ending_erasure'),
+    'tower');
+};
+
+SCENES['scene4_tower_inside']=function(){
+  setHUD(2,'БАШНЯ — ВНУТРИ'); AUDIO.intensify();
+  return S('День 1/2 — Башня, внутри','',
+    'Изнутри башня больше, чем снаружи.<br><br>Концентрические круги людей. Все — лицом внутрь. Все — молча.<br><br>В центре: пульт. Аналоговый. Циферблаты. Переключатели. Микрофон.<br><br>Лампочка мигает в ритме цифр из сна.<br><br>Записка: <em>«Если ты здесь — ты одно из двух: решение или проблема. Трансляции нужен голос. Твой подойдёт.»</em><br><br><span class="bad">Все головы поворачиваются к тебе в одну секунду.</span><br><br>Ты замечаешь — у одного человека в крайнем круге знакомое лицо. Это Вера Константиновна.<br><br>Она смотрит прямо на тебя. Её губы двигаются. Ты читаешь по губам: <em>«не говори своё имя».</em>',
+    C('Сказать в микрофон своё имя.','speak_name','ending_broadcast')+
+    C('Сказать что-то другое. Не имя.','speak_other','ending_broadcast_other')+
+    C('Уничтожить пульт.','destroy','ending_destroy')+
+    C('Встать в круг.','join_circles','ending_circles'),
+    'tower');
+};
+
+SCENES['scene4_return']=function(){
+  setHUD(2,'НА СЕВЕР');
+  return S('День 2 — 06:30 — Обратно в городе','',
+    'Ночь застала тебя вне города. Ты спал в машине. Снова снились цифры — теперь с голосом, который их читает.<br><br>Твой голос.<br><br>Утром — север. Улицы пусты. Только радио в чьём-то окне: помехи с ритмом.<br><br>Дверь башни открыта.',
+    C('Войти в башню.','enter_tower_2','scene4_tower_inside')+
+    C('Сначала в больницу.','last_chance_hospital','scene_hospital_exterior'),
+    'tower');
+};
+
+SCENES['scene3_stay']=function(){
+  setHUD(1,'КВАРТИРА 7В'); flag('stayed',true);
+  return S('День 1 — весь день — Квартира 7В','',
+    'Ты остаёшься. Запираешь дверь. Задёргиваешь шторы.<br><br>Часы проходят. Тон башни становится глубже. Ты чувствуешь его в стенах — в стакане воды на столе, который вибрирует не случайным образом.<br><br>Сообщения прекращаются. Ты отправляешь: <em>«Ты ещё здесь?»</em><br><br>Нет ответа. Три точки шесть часов подряд — и ни одного сообщения.<br><br><span class="bad">В 23:00 все огни во всех зданиях гаснут одновременно. Кроме твоих.</span><br><br>Кто-то стучит. Дважды. Терпеливо.<span class="low">Как будто ему не нужно спешить.</span>',
+    C('Открыть дверь.','open_door','ending_door')+
+    C('Забаррикадироваться.','barricade','scene4_barricade')+
+    C('Позвонить по номеру, с которого пришло сообщение.','call_number','scene_call_back')+
+    C('Покончить с этим самому.','end_self','ending_suicide'),
+    'apartment_inside');
+};
+
+SCENES['scene_call_back']=function(){
+  setHUD(1,'КВАРТИРА 7В');
+  return S('День 1 — 23:15 — Квартира 7В','',
+    'Ты нажимаешь вызов.<br><br>Гудки.<br><br>Три. Четыре. Пять.<br><br>Берут трубку.<br><br>Тишина. Потом — дыхание. Потом — голос. Тихий, усталый, очень далёкий:<br><br><em>«Я думал, ты позвонишь раньше.»</em><br><br>Ты спрашиваешь, кто это.<br><br><em>«Ты сам. Или — то, что от тебя осталось после башни. Я уже в трансляции. Это не так плохо, как ты думаешь. Просто — другое.»</em><br><br>Ты слышишь тон башни в трубке. Очень чистый.<br><br><em>«Открой дверь. Или не открывай. Это не меняет, когда. Меняет только — как.»</em><br><br><span class="bad">Звонок обрывается. На экране телефона — время входящего звонка: 23:15. Продолжительность: 0 секунд.</span>',
+    C('Открыть дверь.','open_door_after_call','ending_door')+
+    C('Забаррикадироваться. Не открывать.','barricade_after_call','scene4_barricade')+
+    C('Покончить с этим.','end_self_call','ending_suicide'),
+    'apartment_inside');
+};
+
+SCENES['scene4_barricade']=function(){
+  setHUD(2,'КВАРТИРА 7В');
+  return S('День 2 — 03:00 — Квартира 7В','',
+    'Диван к двери. Шкаф. Стол.<br><br>Стук не прекращается. Не усиливается. Просто — есть.<br><br>Ты засыпаешь на полу.<br><br>Когда просыпаешься — баррикада цела. Дверь закрыта.<br><br><span class="bad">То, что стучало, сидит в твоём кресле. Спиной. Оно не двигается, когда ты смотришь на него.</span><br><br>Телефон: <em>«оно не входит через двери».</em>',
+    C('Заговорить с ним.','speak_it','ending_chair')+
+    C('Бежать. Сломать баррикаду.','run_out','scene4_return')+
+    C('Покончить с этим.','end_self_2','ending_suicide'),
+    'apartment_inside');
+};
+
+// ══════════════════════════════════════════════════════
+//  КОНЦОВКИ
+// ══════════════════════════════════════════════════════
+
+SCENES['ending_broadcast']=function(){
+  recordDeath('broadcast'); setHUD(null,'ТРАНСЛЯЦИЯ АКТИВНА'); AUDIO.intensify(); BG.draw('tower');
+  return E('КОНЦОВКА I — ГОЛОС',
+    'Ты говоришь своё имя.<br><br>Люди в кругах вдыхают вместе.<br><br>Трансляция идёт. Твой голос, на частотах сквозь бетон и кость, достигает каждого спящего в радиусе, который ты никогда не узнаешь. Они просыпаются. Встают у окон. Идут на север.<br><br>Ты остаёшься у микрофона. Не знаешь — говоришь ещё, или уже стал сигналом.<br><br>Это различие перестаёт иметь значение.',
+    'ТЫ СТАЛ ТЕМ, РАДИ ОСТАНОВКИ ЧЕГО ПРИШЁЛ','ПЕРЕДАТЬ СНОВА');
+};
+
+SCENES['ending_broadcast_other']=function(){
+  recordDeath('broadcast_other'); setHUD(null,'ТРАНСЛЯЦИЯ ИЗМЕНЕНА'); AUDIO.intensify(); BG.draw('tower');
+  return E('КОНЦОВКА II — ДРУГОЙ ГОЛОС',
+    'Ты говоришь не имя. Ты говоришь что-то другое — первое, что приходит в голову. Что-то личное. Что-то, что принадлежит только тебе.<br><br>Круги замирают.<br><br>Тон меняется. Незначительно. Но меняется.<br><br>Люди в кругах начинают двигаться — не к центру, а в стороны. Медленно расходятся. Как будто слышат что-то, что говорит им, что можно идти.<br><br>Ты не знаешь, хорошо ли это. Ты не знаешь, что будет дальше.<br><br>Но пульт замолкает. Башня перестаёт гудеть.<br><br>Небо остаётся не того цвета. Но оно чуть светлее.<br><br>Ты выходишь. Ты единственный, кто выходит из башни стоя.',
+    'ТЫ ИЗМЕНИЛ СИГНАЛ. ЭТО НЕ ТО ЖЕ САМОЕ, ЧТО ОСТАНОВИЛ.','ГОВОРИТЬ СНОВА');
+};
+
+SCENES['ending_destroy']=function(){
+  recordDeath('destroy'); setHUD(null,'СИГНАЛ МЁРТВ'); AUDIO.calm(); BG.draw('void');
+  return E('КОНЦОВКА III — ТИШИНА',
+    'Ты разбиваешь пульт. Руки в крови прежде, чем это заканчивается.<br><br>Тон обрывается. Все падают одновременно — не мёртвые, просто выключенные.<br><br>Ты — единственное движущееся существо в городе. Потом в стране.<br><br>Тишина безупречная.<br><br>Через семь дней ты перестаёшь есть. Тебе не хочется ничего, что осталось.',
+    'ТЫ НИКОГО НЕ СПАС. ТЫ ПЕРЕЖИЛ ИХ НА ОДНУ НЕДЕЛЮ.','СЛОМАТЬ СНОВА');
+};
+
+SCENES['ending_circles']=function(){
+  recordDeath('circles'); setHUD(null,'ПОГЛОЩЁН'); BG.draw('tower');
+  return E('КОНЦОВКА IV — КРУГ',
+    'Ты встаёшь в просвет. Человек рядом сдвигается без слов.<br><br>Тон проходит сквозь тебя. Знакомый. Ты слышал его всю жизнь.<br><br>Ты перестаёшь думать о девочке с мелом. О Вере Константиновне.<br><br>Круги вращаются годами.<br><br>В какой-то момент ты забываешь, что был кем-то, кто мог поступить иначе.',
+    'НЕТ НИ ОДНОЙ ЗАПИСИ О ТОМ, ЧТО ТЫ БЫЛ ТАМ','ВСТАТЬ В КРУГ СНОВА');
+};
+
+SCENES['ending_void']=function(){
+  recordDeath('void'); setHUD(null,'СНАРУЖИ'); BG.draw('void');
+  return E('КОНЦОВКА V — КРАЙ',
+    'Ты идёшь за край дороги.<br><br>Земля твёрдая. Цвет неправильный. Это как идти по внутренней стороне задержанного дыхания.<br><br>Через километр ты оборачиваешься. Города нет. Не уничтожен — просто убран.<br><br>Ничего кроме цвета, у которого нет названия.<br><br>Ты думаешь о цифрах из сна. Это были координаты. Эти координаты.<br><br>Ты всегда должен был оказаться здесь.',
+    'КООРДИНАТЫ БЫЛИ ВНУТРИ ТЕБЯ С САМОГО НАЧАЛА','ВОЙТИ СНОВА');
+};
+
+SCENES['ending_suicide']=function(){
+  recordDeath('suicide'); setHUD(null,'—'); AUDIO.calm(); BG.draw('void');
+  return E('КОНЦОВКА VI — ПОСЛЕДНИЙ ВЫБОР',
+    'Ты понимаешь то, чего остальные ещё не знают.<br><br>Сигнал распространяется через тех, кто продолжает. Каждый шаг на север — переносчик. Каждое утро — ещё день трансляции.<br><br>Ты больше не человек. Ты инфраструктура.<br><br>Этот выход всегда был твоим.<br><br>Тон башни опускается на октаву. Лишь на мгновение.<br><br>Девочка стирает твою фигурку с тротуара. Не перерисовывает.<br><br>Это единственный памятник.',
+    'ТЫ НАШЁЛ ТУ ЕДИНСТВЕННУЮ ДВЕРЬ, КОТОРАЯ ПРИНАДЛЕЖАЛА ТЕБЕ','ВЕРНУТЬСЯ К СИГНАЛУ');
+};
+
+SCENES['ending_door']=function(){
+  recordDeath('door'); setHUD(null,'КОРИДОР'); BG.draw('corridor');
+  return E('КОНЦОВКА VII — ЧТО ВОШЛО',
+    'Ты открываешь дверь. Коридор пуст.<br><br>Стук не просился внутрь. Он звал тебя выйти.<br><br>Ты шагаешь. Дверь запирается за тобой сама.<br><br>Коридор длиннее, чем должен. 7Г, 7Д, 7Е, 7Ж — двери, которых не было.<br><br>Ты идёшь, пока пол не кончается и не начинается неправильный цвет.<br><br><span style="color:#3a2a18;font-style:italic;font-size:0.9em;">Стук снова — сзади, с той стороны, откуда ты пришёл.</span>',
+    'КОРИДОР ВСЕГДА БЫЛ ДЛИННЕЕ, ЧЕМ ТЫ ДУМАЛ','ОТКРЫТЬ СНОВА');
+};
+
+SCENES['ending_chair']=function(){
+  recordDeath('chair'); setHUD(null,'КВАРТИРА 7В'); BG.draw('apartment_inside');
+  return E('КОНЦОВКА VIII — ПРИСУТСТВИЕ',
+    'Ты говоришь с ним.<br><br>Оно не отвечает. Его присутствие и было ответом.<br><br>Ты говоришь долго — о детстве, о людях, которым не сказал нужного, о небе.<br><br>Оно поворачивается к тебе.<br><br>Нет слов для того, что ты видишь ни в одном языке, кроме созданного специально для этого момента.<br><br>Тебе не страшно. Это самое странное.<br><br>Тебе хотелось бы больше времени.',
+    'ОНО БЫЛО ТЕРПЕЛИВЫМ, ПОТОМУ ЧТО ЗНАЛО: ТЫ ОСТАНЕШЬСЯ','ПОВЕРНУТЬСЯ К НЕМУ СНОВА');
+};
+
+SCENES['ending_erasure']=function(){
+  recordDeath('erasure'); setHUD(null,'ТРОТУАР'); AUDIO.calm(); BG.draw('void');
+  return E('КОНЦОВКА IX — СТИРАНИЕ',
+    'Ты остаёшься на тротуаре.<br><br>Девочка рисует тебя снова и снова — все варианты. Башня. Побег. Дверь. Рисует и стирает.<br><br>Твоя фигурка — последняя.<br><br>В том, чтобы остаться, было достоинство. Ты не пытался решить. Просто отказался дать этому власть.<br><br>Небо возвращается к правильному цвету. На секунду. Чтобы ты увидел.<br><br>Потом меловая пыль забирает тебя — медленно, с краёв, как рассвет.',
+    'ТЫ БЫЛ ЕДИНСТВЕННЫМ, КТО СЕЛ. ЭТО ИМЕЛО ЗНАЧЕНИЕ. И НЕ ИМЕЛО ТОЖЕ.','СЕСТЬ СНОВА');
+};
+
+SCENES['ending_fire']=function(){
+  recordDeath('fire'); setHUD(null,'ЛЕС'); BG.draw('forest');
+  return E('КОНЦОВКА X — ОГОНЬ',
+    'Ты поджигаешь дом.<br><br>Он горит быстро — слишком быстро для деревянного здания.<br><br>В огне тетрадь горит тоже. Ты смотришь, пока страницы не превращаются в пепел.<br><br>Тон башни на секунду становится тише. Потом — громче, чем раньше.<br><br>Лес вокруг не загорается. Мёртвые деревья не горят.<br><br>Ты стоишь у огня до утра.<br><br>Утром пепел холодный. На земле под ним — цифры. Та же последовательность. Выжжена в земле.<br><br>Ты не можешь сжечь то, что уже внутри тебя.',
+    'ОГОНЬ НИЧЕГО НЕ СТЁР. ОН ПРОСТО ОБНАЖИЛ.','ЗАЖЕЧЬ СНОВА');
+};
+
+SCENES['ending_patients']=function(){
+  recordDeath('patients'); setHUD(null,'БОЛЬНИЦА'); BG.draw('hospital');
+  return E('КОНЦОВКА XI — ПАЛАТА',
+    'Ты ложишься в свободную кровать.<br><br>Простыня белая. Чистая.<br><br>Тон проходит сквозь матрас, сквозь кровать, сквозь пол.<br><br>Остальные пациенты смотрят в потолок. Ты смотришь тоже.<br><br>Там — ничего особенного. Просто потолок.<br><br>Но со временем ты начинаешь видеть в нём паттерн. Тот же, что в снах. Тот же, что в числах.<br><br>Где-то снаружи, ты знаешь, башня продолжает звать. Девочка рисует.<br><br>Здесь — тихо.<br><br>Шрам за левым ухом появляется на третий день. Маленький. Аккуратный. Ты не помнишь, когда.',
+    'ТИШИНА — ЭТО ТОЖЕ ФОРМА СОГЛАСИЯ','ЛЕЧЬ СНОВА');
+};
+
+SCENES['ending_basement_stay']=function(){
+  recordDeath('basement_stay'); setHUD(null,'ПОДВАЛ'); BG.draw('bunker');
+  return E('КОНЦОВКА XII — ХРАНИТЕЛЬ',
+    'Ты остаёшься в подвале.<br><br>Старший ты уходит. Наконец-то. Он не оглядывается.<br><br>Ты берёшь его место у генератора. Он тёплый — не от тепла машины. От тепла рук.<br><br>Генератор гудит. Тон сужается. Остаётся управляемым.<br><br>Ты не знаешь, сколько времени проходит.<br><br>Через какое-то время появляется кто-то другой. Молодой. Растерянный. Слышит сигнал. Смотрит на тебя без удивления.<br><br>Ты говоришь: <em>«Ты пришёл раньше, чем я ожидал. Или позже. Я уже не понимаю разницы.»</em>',
+    'КАЖДЫЙ ХРАНИТЕЛЬ СТАНОВИТСЯ ТЕМ, ОТ КОГО УБЕГАЛ','ОСТАТЬСЯ СНОВА');
+};
+
+SCENES['ending_generator_off']=function(){
+  recordDeath('generator_off'); setHUD(null,'ВЕЗДЕ'); AUDIO.calm(); BG.draw('void');
+  return E('КОНЦОВКА XIII — РАСШИРЕНИЕ',
+    'Ты выключаешь генератор.<br><br>Тон исчезает.<br><br>На секунду — тишина. Настоящая. Первая за всё время.<br><br>Потом — не тон, не звук, а присутствие. Везде одновременно. Без частоты. Без направления.<br><br>Башня гаснет. Люди в кругах просыпаются. Смотрят вокруг. Не понимают, где они.<br><br>Но сигнал теперь — везде. В воздухе, в воде, в земле. Без фильтра. Без башни-антенны.<br><br>Старший ты был прав. Ты это понимаешь через несколько часов, когда небо перестаёт быть неправильного цвета и становится цветом, у которого нет названия вообще.',
+    'ТЫ УБРАЛ СТЕНЫ. ТО, ЧТО БЫЛО ВНУТРИ, ТЕПЕРЬ ВЕЗДЕ.','ВЫКЛЮЧИТЬ СНОВА');
+};
+
+// ══════════════════════════════════════════════════════
+//  INIT
+// ══════════════════════════════════════════════════════
+window.addEventListener('DOMContentLoaded',function(){
+  BG.init();
+  updateDeathsLog();
+  setInterval(function(){if(Math.random()<0.10)triggerStatic();},4500);
+  setInterval(function(){if(Math.random()<0.04)triggerFlash();},7000);
+  var save=loadSave();
+  if(save&&save.scene&&save.scene!=='title'&&SCENES[save.scene]){
+    STATE=save; render(save.scene);
+  } else {
+    render('title');
+  }
+});
+</script>
+</body>
+</html>
